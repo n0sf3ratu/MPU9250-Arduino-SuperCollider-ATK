@@ -1,0 +1,92 @@
+// ------------------------------------------------------------
+// UHJ (stereo) decoder
+//
+// mono pink noise source
+// omni encoder
+
+
+// define encoder / decoder matrices
+~encoder = FoaEncoderMatrix.newOmni
+~decoder = FoaDecoderKernel.newUHJ       // kernel decoders should be freed after use!!
+                                         // free below...
+
+// inspect
+~encoder.kind
+~encoder.numChannels
+~encoder.dirChannels
+
+~decoder.kind
+~decoder.numChannels
+~decoder.dirChannels.raddeg
+
+(
+SynthDef(\ambi, {|angle =0, azim =0, gate=1|
+    var sig,env;// audio signal
+
+    // display encoder and decoder
+    "Ambisonic encoding via % encoder".format(~encoder.kind).postln;
+    "Ambisonic decoding via % decoder".format(~decoder.kind).postln;
+
+    // ------------------------------------------------------------
+    // test sig
+	//PlayBuf.ar(1,)
+    sig = PinkNoise.ar;             // mono pink noise
+
+
+    // ------------------------------------------------------------
+    // encode
+    sig = FoaEncode.ar(sig, ~encoder);
+
+    // ------------------------------------------------------------
+    // transform
+    sig = FoaTransform.ar(sig, 'push', angle, azim);
+
+	env = EnvGen.kr(Env.asr(0.1,1,0.5), gate, doneAction:2);
+
+
+
+    // ------------------------------------------------------------
+    // decode (to stereo)
+	Out.ar(0,FoaDecode.ar(sig, ~decoder)*env);
+
+};
+).add
+
+)
+
+
+~arduino = ArduinoTSV("/dev/tty.usbmodem1421", 115200);
+~synthAmb = Synth(\ambi) // play
+~synthAmb.set(\gate,0)..
+
+(
+~arduino.action = {|...msg|
+
+	~imuGx = msg[0].postln;
+	~imuGy = msg[1].postln;
+	~imuGz = msg[2].postln;
+
+};
+);
+//---------------
+
+(
+Tdef(\ambirutina, {
+	inf.do{
+		~synthAmb.set(\azim, ~imuGy.asFloat.linlin(-9.0,9.0,pi/2,0), \angle,~imuGx.asFloat.linlin(-9.0,9.0,pi,-pi));
+		0.01.wait
+
+	}
+
+})
+);
+
+~synthAmb = Synth(\ambi) ;Tdef(\ambirutina).play
+~synthAmb.set(\gate,0) ;Tdef(\ambirutina).stop
+
+~arduino.close; // CERRAR PUERTO!!!
+
+// free kernel
+~decoder.free
+
+// ------------------------------------------------------------
